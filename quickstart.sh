@@ -5,7 +5,24 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-python3 -m venv .venv
+# open3d (needed by tutorial example4) ships wheels for Python 3.10-3.12 only;
+# prefer an interpreter in that range over a newer default python3.
+PY=""
+for cand in python3.12 python3.11 python3.10 python3; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        if "$cand" -c 'import sys; sys.exit(0 if (3,10) <= sys.version_info[:2] <= (3,12) else 1)'; then
+            PY="$cand"
+            break
+        fi
+    fi
+done
+if [ -z "$PY" ]; then
+    echo "No Python 3.10-3.12 found on PATH (needed for the open3d wheel used by example4)." >&2
+    exit 1
+fi
+echo "Using $PY ($($PY --version 2>&1))"
+
+"$PY" -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q mujoco numpy opencv-python-headless open3d
 
