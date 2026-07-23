@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+third_party/
+.DS_Store
+
+# Generated media (the two demo videos are tracked explicitly)
+*.png
+*.jpg
+*.pcd
+*.mp4
+!demo/heart_gesture.mp4
+!demo/full_demo.mp4
+
+# Local working notes — not part of the public tool
+planning/
+DEVELOPER_EXPERIENCE_REPORT.md
+demo/workspace_analysis.md

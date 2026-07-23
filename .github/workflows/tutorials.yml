@@ -1,0 +1,41 @@
+name: tutorials
+# Proof of the headline claim: all 10 official Galbot G1 tutorials pass
+# byte-unmodified against this backend, on a clean machine, with the SDK
+# examples and S1 model cloned fresh from Galbot's public repos.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -q mujoco numpy opencv-python-headless open3d pytest
+
+      - name: Fetch Galbot SDK examples (sparse) and public S1 model
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/GalaxyGeneralRobotics/GalbotSDK third_party/GalbotSDK
+          git -C third_party/GalbotSDK sparse-checkout set examples/g1/python/tutorials
+          git clone --depth 1 \
+            https://github.com/GalaxyGeneralRobotics/galbot_s1_description \
+            third_party/galbot_s1_description
+
+      - name: Import surface tests
+        run: PYTHONPATH=. pytest -q tests/test_import_surface.py
+
+      - name: Tutorial suite (10/10, byte-unmodified)
+        run: |
+          GALBOTSIM_PYTHON=python \
+          GALBOT_SDK_EXAMPLES=$PWD/third_party/GalbotSDK/examples/g1/python/tutorials \
+          GALBOTSIM_MODEL_XML=$PWD/third_party/galbot_s1_description/mjcf/galbot_s1_v1_1_0.xml \
+          bash tests/run_tutorials.sh
