@@ -22,7 +22,6 @@ To run your own SDK scripts against it:
 
 ```bash
 PYTHONPATH=/path/to/galbot-sim \
-GALBOTSIM_MODEL_XML=/path/to/galbot_s1_description/mjcf/galbot_s1_v1_1_0.xml \
 python your_script.py
 ```
 
@@ -39,7 +38,7 @@ Galbot's developer portal offers a browser-based online simulation with a deploy
 - Sensors are procedural — deterministic frames in the documented formats, not rendered images.
 - Collision checking is registry-based, not geometric.
 - `is_blocking=False` completes immediately.
-- The G1 API is emulated on the S1 model (leg mapping below); there is no public G1 description.
+- The G1 API is emulated on Galbot's public S1 model (leg mapping below).
 
 ## Behaviors discovered while building this
 

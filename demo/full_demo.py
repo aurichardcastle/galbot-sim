@@ -6,11 +6,12 @@ import numpy as np
 import mujoco
 import imageio.v2 as imageio
 
+from galbot_sdk._world import _discover_model_xml
+
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "full_demo.mp4")
-MODEL = os.environ.get("GALBOTSIM_MODEL_XML",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                 "third_party", "galbot_s1_description", "mjcf",
-                 "galbot_s1_v1_1_0.xml"))
+MODEL = os.environ.get("GALBOTSIM_MODEL_XML") or _discover_model_xml()
+if not MODEL:
+    raise SystemExit("No S1 MJCF found. Run ./quickstart.sh first, or set GALBOTSIM_MODEL_XML.")
 
 spec = mujoco.MjSpec.from_file(MODEL)
 spec.visual.global_.offwidth = 1280

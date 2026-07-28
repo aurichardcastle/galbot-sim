@@ -31,6 +31,7 @@ quaternion about +Z); collision registries are bookkeeping only.
 from __future__ import annotations
 
 import dataclasses
+import glob
 import logging
 import math
 import os
@@ -42,7 +43,7 @@ import mujoco
 import numpy as np
 
 __all__ = [
-    "DEFAULT_MODEL_XML", "MODEL_XML_ENV", "RENDER_ENV",
+    "DEFAULT_MJCF_DIR", "MODEL_XML_ENV", "RENDER_ENV",
     "MACHINE_G1", "MACHINE_S1",
     "UNINIT", "RUNNING", "SHUTDOWN_REQUESTED", "DESTROYED",
     "LEG2_SCALE", "GRIPPER_LUT", "GRIPPER_WIDTH_MIN", "GRIPPER_WIDTH_MAX",
@@ -66,11 +67,27 @@ if os.environ.get("GALBOTSIM_LOG_LEVEL"):
 
 MODEL_XML_ENV = "GALBOTSIM_MODEL_XML"
 RENDER_ENV = "GALBOTSIM_RENDER"  # =1 -> real-rendering seam (deferred; procedural default)
-# Default: the quickstart.sh checkout location, relative to the repo root.
-DEFAULT_MODEL_XML = os.path.join(
+
+#: Where quickstart.sh checks the description repo out, relative to the repo root.
+DEFAULT_MJCF_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "third_party", "galbot_s1_description", "mjcf", "galbot_s1_v1_1_0.xml",
+    "third_party", "galbot_s1_description", "mjcf",
 )
+
+
+def _discover_model_xml(mjcf_dir: str = DEFAULT_MJCF_DIR) -> str | None:
+    """Find the S1 MJCF in a checkout of ``galbot_s1_description``.
+
+    Upstream has renamed this file before (``galbot_s1_v1_1_0.xml`` ->
+    ``galbot_s1.xml``), so the filename is discovered rather than hard-coded:
+    any ``galbot_s1*.xml`` in ``mjcf/`` is accepted, shortest name first so a
+    plain ``galbot_s1.xml`` wins over a versioned sibling. Returns None when
+    the directory is absent or holds no candidate.
+    """
+    if not os.path.isdir(mjcf_dir):
+        return None
+    candidates = sorted(glob.glob(os.path.join(mjcf_dir, "galbot_s1*.xml")), key=lambda p: (len(p), p))
+    return candidates[0] if candidates else None
 
 # --------------------------------------------------------------------------- #
 # Machine / group tables (verified against planning/model_mapping.json)       #
@@ -375,12 +392,14 @@ class World:
         if self.state in (SHUTDOWN_REQUESTED, DESTROYED):
             _LOG.warning("GalbotSim world: init() after shutdown/destroy is not supported")
             return False
-        xml_path = os.environ.get(MODEL_XML_ENV) or DEFAULT_MODEL_XML
-        if not os.path.isfile(xml_path):
+        xml_path = os.environ.get(MODEL_XML_ENV) or _discover_model_xml()
+        if not xml_path or not os.path.isfile(xml_path):
+            found = sorted(os.path.basename(p) for p in glob.glob(os.path.join(DEFAULT_MJCF_DIR, "*.xml")))
             raise RuntimeError(
-                f"GalbotSim: S1 MJCF model not found at '{xml_path}'. "
-                f"Set the {MODEL_XML_ENV} environment variable to a valid "
-                f"galbot_s1_v1_1_0.xml path (see planning/DESIGN.md §5.5)."
+                f"GalbotSim: S1 MJCF model not found. Looked for galbot_s1*.xml in "
+                f"'{DEFAULT_MJCF_DIR}' (found: {found or 'nothing'}). Run ./quickstart.sh, "
+                f"or set {MODEL_XML_ENV} to an MJCF from "
+                f"github.com/GalaxyGeneralRobotics/galbot_s1_description."
             )
         try:
             self._model = mujoco.MjModel.from_xml_path(xml_path)

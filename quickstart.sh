@@ -38,7 +38,9 @@ if [ ! -d third_party/galbot_s1_description ]; then
         third_party/galbot_s1_description
 fi
 
+# GALBOTSIM_MODEL_XML is left unset on purpose: the MJCF filename is discovered
+# from third_party/galbot_s1_description/mjcf/, so an upstream rename does not
+# break the quickstart. Set it explicitly to point at a different model.
 GALBOTSIM_PYTHON="$PWD/.venv/bin/python" \
 GALBOT_SDK_EXAMPLES="$PWD/third_party/GalbotSDK/examples/g1/python/tutorials" \
-GALBOTSIM_MODEL_XML="$PWD/third_party/galbot_s1_description/mjcf/galbot_s1_v1_1_0.xml" \
 bash tests/run_tutorials.sh
