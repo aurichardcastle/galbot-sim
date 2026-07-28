@@ -24,8 +24,10 @@ Quaternion convention (DESIGN.md §6): SDK pose7 is ``[x, y, z, qx, qy, qz, qw]`
 (:func:`_wxyz_to_xyzw`, :func:`_xyzw_to_wxyz`) and nowhere else.
 
 Accepted fidelity deltas (documented): one world is shared by all machine types
-in a process; the base is assumed flat (writing yaw rebuilds the free-joint
-quaternion about +Z); collision registries are bookkeeping only.
+in a process; the base is planar (``base_x_joint`` / ``base_y_joint`` /
+``base_yaw_joint`` are three 1-DOF model joints, not a free joint, so z is
+structurally 0 and pose quaternions are rebuilt from yaw); collision registries
+are bookkeeping only.
 """
 
 from __future__ import annotations
@@ -107,7 +109,7 @@ _RIGHT_ARM_JOINTS = tuple(f"right_arm_joint{i}" for i in range(1, 8))
 _HEAD_JOINTS = ("head_joint1", "head_joint2")
 _TORSO_JOINTS = ("torso_lift_joint1",)
 _LEG_JOINTS = tuple(f"leg_joint{i}" for i in range(1, 6))  # G1 compat, emulated
-_CHASSIS_JOINTS = ("chassis_x", "chassis_y", "chassis_yaw")  # planar view of the free base
+_CHASSIS_JOINTS = ("chassis_x", "chassis_y", "chassis_yaw")  # -> base_x/base_y/base_yaw_joint
 
 #: SDK joint-group -> ordered SDK joint names.  Groups with no S1 counterpart
 #: (dexhand / suction / camera) are resolvable with zero DOF.
@@ -253,7 +255,7 @@ class JointRef:
       * ``leg2``    — G1 leg_joint2 emulated on torso_lift_joint1 via LEG2_SCALE
       * ``virtual`` — stored & echoed only (leg_joint1/3/4/5); never touches qpos
       * ``gripper`` — drive joint qpos + coupled (-theta, +theta) qpos triple
-      * ``base_x`` / ``base_y`` / ``base_yaw`` — planar components of the free base
+      * ``base_x`` / ``base_y`` / ``base_yaw`` — the three 1-DOF model base joints
     """
 
     name: str
@@ -482,7 +484,7 @@ class World:
             )
             refs[drive.name] = dataclasses.replace(drive, kind="gripper", coupled=coupled)
 
-        # Planar view of the free base (G1 'chassis' / S1 'swerve_chassis').
+        # The three 1-DOF base joints (G1 'chassis' / S1 'swerve_chassis').
         refs["chassis_x"] = JointRef(name="chassis_x", kind="base_x")
         refs["chassis_y"] = JointRef(name="chassis_y", kind="base_y")
         refs["chassis_yaw"] = JointRef(name="chassis_yaw", kind="base_yaw")
@@ -550,7 +552,7 @@ class World:
         if ref.kind == "base_y":
             return float(d.qpos[1])
         if ref.kind == "base_yaw":
-            return _quat_yaw(d.qpos[3:7])
+            return float(d.qpos[2])
         raise AssertionError(f"unhandled JointRef kind {ref.kind!r}")
 
     @staticmethod
@@ -569,7 +571,7 @@ class World:
         elif ref.kind == "base_y":
             qpos[1] = value
         elif ref.kind == "base_yaw":
-            qpos[3:7] = _yaw_quat(value)  # flat-base assumption (documented)
+            qpos[2] = value
         # "virtual" is handled by callers (no physical effect)
 
     def get_positions(self, refs) -> list[float]:
@@ -780,43 +782,52 @@ class World:
     # ------------------------------------------------------------------ #
 
     def base_pose7(self) -> list[float]:
-        """pose7 [x,y,z,qx,qy,qz,qw] of the free-joint base (world/odom/map frame)."""
+        """pose7 [x,y,z,qx,qy,qz,qw] of the planar base (world/odom/map frame).
+
+        The S1 base is three 1-DOF joints -- base_x_joint (slide, qpos[0]),
+        base_y_joint (slide, qpos[1]), base_yaw_joint (hinge, qpos[2]) -- not a
+        free joint.  z is structurally 0 and the quaternion is rebuilt from yaw.
+        """
         self._require_model()
         q = self._data.qpos
-        return [float(q[0]), float(q[1]), float(q[2]), *_wxyz_to_xyzw(q[3:7])]
+        yaw = (float(q[2]) + math.pi) % (2.0 * math.pi) - math.pi  # canonical (-pi, pi]
+        yq = _yaw_quat(yaw)
+        return [float(q[0]), float(q[1]), 0.0, *_wxyz_to_xyzw(yq)]
 
     def set_base_pose7(self, pose7, substeps: int = 20) -> None:
-        """Teleport-by-interpolation of the free-joint base (qpos 0-6)."""
+        """Teleport-by-interpolation of the planar base (qpos 0,1,2).
+
+        The z component of ``pose7`` is ignored (the base cannot leave the
+        floor) and only the yaw component of the quaternion is used.
+        """
         self._require_model()
         tp = [float(v) for v in pose7]
         if len(tp) != 7 or not all(math.isfinite(v) for v in tp):
             raise ValueError("base pose must be 7 finite floats [x,y,z,qx,qy,qz,qw]")
         d = self._data
-        p0 = np.array(d.qpos[0:3])
-        q0 = np.array(d.qpos[3:7])
-        p1 = np.array(tp[0:3])
-        q1 = _xyzw_to_wxyz(tp[3:7])
-        if float(np.dot(q0, q1)) < 0.0:
-            q1 = -q1  # shortest-arc nlerp
+        x0, y0, yaw0 = float(d.qpos[0]), float(d.qpos[1]), float(d.qpos[2])
+        x1, y1 = tp[0], tp[1]
+        yaw1 = _quat_yaw(_xyzw_to_wxyz(tp[3:7]))
+        dyaw = (yaw1 - yaw0 + math.pi) % (2.0 * math.pi) - math.pi  # shortest arc
         n = max(1, int(substeps))
         for k in range(1, n + 1):
             a = k / n
-            d.qpos[0:3] = p0 + (p1 - p0) * a
-            d.qpos[3:7] = _quat_normalize(q0 + (q1 - q0) * a)
+            d.qpos[0] = x0 + (x1 - x0) * a
+            d.qpos[1] = y0 + (y1 - y0) * a
+            d.qpos[2] = yaw0 + dyaw * a
             mujoco.mj_forward(self._model, d)
 
     def base_pose2d(self) -> tuple[float, float, float]:
         """(x, y, yaw) planar view of the base."""
         self._require_model()
         q = self._data.qpos
-        return float(q[0]), float(q[1]), _quat_yaw(q[3:7])
+        return float(q[0]), float(q[1]), float(q[2])
 
     def set_base_pose2d(self, x: float, y: float, yaw: float, substeps: int = 20) -> None:
-        """Planar base motion; keeps current z, rebuilds the quat about +Z."""
+        """Planar base motion: writes base_x / base_y / base_yaw directly."""
         self._require_model()
-        z = float(self._data.qpos[2])
         yq = _yaw_quat(float(yaw))
-        self.set_base_pose7([float(x), float(y), z, *_wxyz_to_xyzw(yq)], substeps=substeps)
+        self.set_base_pose7([float(x), float(y), 0.0, *_wxyz_to_xyzw(yq)], substeps=substeps)
 
     def apply_base_velocity(self, vx: float, vy: float, wyaw: float,
                             duration_s: float, substeps: int = 20) -> None:
@@ -837,7 +848,7 @@ class World:
             yaw += float(wyaw) * dt
             d.qpos[0] = x
             d.qpos[1] = y
-            d.qpos[3:7] = _yaw_quat(yaw)
+            d.qpos[2] = yaw
             mujoco.mj_forward(self._model, d)
 
     # ------------------------------------------------------------------ #

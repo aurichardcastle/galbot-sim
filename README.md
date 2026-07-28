@@ -46,7 +46,8 @@ Documented because they are load-bearing for anyone who tries the same:
 
 - **Speed/timeout semantics.** `example1` commands a 2.54 rad move at `speed=0.1 rad/s` with `timeout=20 s` — honest arithmetic needs 25.4 s. Emulating that race returns `TIMEOUT` and the tutorial fails; blocking calls here complete fully instead.
 - **Out-of-range targets.** The `example1` heart pose commands `arm_joint6 = ±0.82` against a ±0.7854 joint range. Rejecting it fails the tutorial; targets are clipped to range, then succeed.
-- **Actuator order ≠ joint order** in the S1 MJCF (left arm actuators 1–7, right arm 16–22, grippers 25–26). All mapping here is resolved by joint name at load time.
+- **Actuator order ≠ joint order** in the S1 MJCF. The model has 22 actuators (left arm 1–7, right arm 8–14, head 15–16, torso lift 17, grippers 18–19, base 20–22) against 26 joints, and `qpos` order differs again — `qpos[0:3]` is the base, `qpos[3]` the torso lift. All mapping here is resolved by joint name at load time rather than by index.
+- **The base is not a free joint.** It is three 1-DOF joints (`base_x_joint`, `base_y_joint`, `base_yaw_joint`), so there is no base quaternion in `qpos` to read; pose7 is rebuilt from yaw and z is structurally 0.
 - **Gripper actuators can't servo** (kp = 1.0 vs 50,000 on the arms). Gripper control writes positions kinematically through the four-bar coupling (active2 = −θ, passive = +θ) and a 21-point width↔angle table derived from the model.
 - **Leg emulation.** G1 tutorials command `leg_joint1–5`; the S1 model has a prismatic torso lift. `leg_joint2` maps to the lift (scaled); the others are stored and echoed back.
 
